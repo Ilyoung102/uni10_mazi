@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>미로 탐색 시뮬레이션</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    background: #080818; color: #ccd;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 8px 28px;
+}
+h1 { color: #99aaff; font-size: 1.15em; margin-bottom: 10px; letter-spacing: 1px; }
+.row {
+    display: flex; align-items: center; gap: 7px;
+    margin-bottom: 7px; flex-wrap: wrap; justify-content: center;
+}
+button { padding: 6px 13px; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 700; transition: transform .1s, filter .15s; }
+button:hover  { filter: brightness(1.3); }
+button:active { transform: scale(.95); }
+#btnNew   { background: #2255cc; color: #eef; }
+#btnStart { background: #1a7a3c; color: #efe; }
+#btnStop  { background: #aa2211; color: #fee; }
+#sndBtn { padding: 5px 10px; border-radius: 20px; font-size: 12px;
+    background: #1a3a2a; border: 1px solid #3a6; color: #6d6; cursor: pointer; }
+#sndBtn.off { background: #1a1a2a; border-color: #335; color: #557; }
+.lbl { font-size: 12px; color: #778; }
+input[type=range]  { width: 95px; accent-color: #5577ff; cursor: pointer; }
+input[type=number] { width: 52px; padding: 4px 6px; background: #111128;
+    border: 1px solid #335; border-radius: 4px; color: #aabf; font-size: 13px; text-align: center; }
+#spdLbl { min-width: 20px; color: #aabf; font-size: 12px; }
+
+/* Algorithm grid: 2 rows × 4 */
+.algo-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 6px; margin-bottom: 7px; max-width: 380px; width: 100%;
+}
+.abtn {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 4px; background: #111128; border: 1px solid #222244;
+    border-radius: 9px; cursor: pointer; transition: all .2s; color: #667;
+}
+.abtn:hover { background: #1a1a3a; border-color: #446; color: #99b; }
+.abtn.on { background: #192d5a; border-color: #5577ff; color: #aaccff;
+    box-shadow: 0 0 8px #3355ff33; }
+.abtn .ai { font-size: 18px; line-height: 1.1; }
+.abtn .an { font-size: 10px; font-weight: 700; }
+.abtn .ad { font-size: 8.5px; color: #445; }
+.abtn.on .ad { color: #6688aa; }
+
+#status { height: 18px; font-size: 12px; color: #88aaff; margin-bottom: 6px; text-align: center; }
+canvas { border: 1px solid #1a1a33; border-radius: 3px; display: block; }
+#legend {
+    display: flex; flex-wrap: wrap; gap: 4px 13px;
+    margin-top: 9px; font-size: 10.5px; color: #556; justify-content: center;
+}
+.leg { display: flex; align-items: center; gap: 4px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<h1>🧩 미로 탐색 시뮬레이션</h1>
+
+<div class="row">
+    <button id="btnNew">🗺 새 미로</button>
+    <button id="btnStart">▶ 시작</button>
+    <button id="btnStop">⏹ 중지</button>
+    <span class="lbl">속도</span>
+    <input type="range" id="spdSlider" min="1" max="60" value="20">
+    <span id="spdLbl">20</span>
+    <button id="sndBtn">🔊 소리</button>
+</div>
+<div class="row">
+    <span class="lbl">크기</span>
+    <input type="number" id="sizeInput" min="5" max="50" value="20">
+    <span class="lbl">×<span id="sizeLbl">20</span> &nbsp;(5~50)</span>
+</div>
+
+<div class="algo-grid" id="algoGrid"></div>
+<div id="status">새 미로를 생성하고 시작하세요.</div>
+<canvas id="c"></canvas>
+<div id="legend">
+    <div class="leg"><div class="dot" style="background:#ffd700"></div><span>탐색 중</span></div>
+    <div class="leg"><div class="dot" style="background:#0d405a"></div><span>방문</span></div>
+    <div class="leg"><div class="dot" style="background:#350a45"></div><span>막힌 길</span></div>
+    <div class="leg"><div class="dot" style="background:#3a1200"></div><span>BiDi-목표측</span></div>
+    <div class="leg"><div class="dot" style="background:#2a0808"></div><span>막힌길제거</span></div>
+    <div class="leg"><div class="dot" style="background:#00cc66"></div><span>최단경로(2단계)</span></div>
+</div>
+
+<script>
+// ── 알고리즘 정의 ─────────────────────────────────────────────────────────────
+const ALGOS = [
+    {id:'dfs',    icon:'🔍', name:'DFS',    desc:'깊이우선'},
+    {id:'bfs',    icon:'🌊', name:'BFS',    desc:'너비우선'},
+    {id:'astar',  icon:'⭐', name:'A★',     desc:'최단유도'},
+    {id:'lhr',    icon:'👈', name:'왼손법칙', desc:'좌편향DFS'},
+    {id:'random', icon:'🎲', name:'무작위',  desc:'랜덤DFS'},
+    {id:'tremaux',icon:'🗺️', name:'트레모',  desc:'통로표시'},
+    {id:'deadend',icon:'🧹', name:'막힌길↓',  desc:'막힌길제거'},
+    {id:'bidi',   icon:'↕️', name:'양방향',  desc:'양방향BFS'},
+];
+let curAlgo = 'dfs';
+
+// ── 전역 상태 ─────────────────────────────────────────────────────────────────
+let ROWS=20, COLS=20, CS=28;
+let walls=null, p1Steps=[], bfsPath=[];
+// 셀 상태: 0=미방문 1=방문 2=막힘 3=BFS경로예약 4=BFS통과 5=biDiA 6=biDiB 7=막힌길
+let cellSt=[], agent=[0,0], agentB=null;
+let phase='idle', idx=0, timer=null;
+let soundOn=true, audioCtx=null;
+// 트레모 통로 마크 (ROWS×COLS×4)
+let pMark=null;
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+function CENTER(){ return [ROWS>>1, COLS>>1]; }
+function updateCanvas(){
+    const avail=Math.min(560,(window.innerWidth||600)-28);
+    CS=Math.max(6,Math.floor(avail/Math.max(ROWS,COLS)));
+    canvas.width=COLS*CS+1; canvas.height=ROWS*CS+1;
+}
+
+// ── 방향 (0=N 1=E 2=S 3=W) ────────────────────────────────────────────────────
+const DIRS4=[
+    [-1, 0,'top',   'bottom'],
+    [ 0, 1,'right', 'left'  ],
+    [ 1, 0,'bottom','top'   ],
+    [ 0,-1,'left',  'right' ],
+];
+const W4=['top','right','bottom','left'];
+const DR4=[-1,0,1,0], DC4=[0,1,0,-1];
+function dIdx(dr,dc){ return dr<0?0:dc>0?1:dr>0?2:3; }
+function inBounds(r,c){ return r>=0&&r<ROWS&&c>=0&&c<COLS; }
+function canGo(r,c,d){ return !walls[r][c][W4[d]]&&inBounds(r+DR4[d],c+DC4[d]); }
+
+function shuffle(a){
+    for(let i=a.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]];}
+    return a;
+}
+
+// ── 미로 생성 ─────────────────────────────────────────────────────────────────
+function genMaze(){
+    walls=Array.from({length:ROWS},()=>
+        Array.from({length:COLS},()=>({top:true,right:true,bottom:true,left:true})));
+    const vis=Array.from({length:ROWS},()=>Array(COLS).fill(false));
+    const stk=[[0,0,shuffle([0,1,2,3])]];
+    vis[0][0]=true;
+    while(stk.length){
+        const [r,c,dirs]=stk[stk.length-1];
+        if(!dirs.length){stk.pop();continue;}
+        const d=dirs.pop(), nr=r+DR4[d], nc=c+DC4[d];
+        if(!inBounds(nr,nc)||vis[nr][nc]) continue;
+        walls[r][c][W4[d]]=false; walls[nr][nc][W4[(d+2)%4]]=false;
+        vis[nr][nc]=true; stk.push([nr,nc,shuffle([0,1,2,3])]);
+    }
+}
+
+// ── 공통 DFS 프레임워크 ─────────────────────────────────────────────────────
+// getDirOrder(facing) → 방향 인덱스 배열 (우선순위 순서)
+function buildGenericDFS(getDirOrder){
+    const [cr,cc]=CENTER();
+    const steps=[{act:'move',r:0,c:0}];
+    const vis=new Set(['0,0']);
+    // 스택: [r, c, 남은방향배열, facing]
+    const stk=[[0,0,[...getDirOrder(1)],1]]; // 초기 facing=East
+    let found=false;
+    while(stk.length&&!found){
+        const top=stk[stk.length-1];
+        const [r,c,dq]=top;
+        if(r===cr&&c===cc){found=true;break;}
+        let moved=false;
+        while(dq.length){
+            const d=dq.shift();
+            const nr=r+DR4[d],nc=c+DC4[d],key=`${nr},${nc}`;
+            if(inBounds(nr,nc)&&!walls[r][c][W4[d]]&&!vis.has(key)){
+                vis.add(key);
+                steps.push({act:'move',r:nr,c:nc});
+                stk.push([nr,nc,[...getDirOrder(d)],d]);
+                moved=true; break;
+            }
+        }
+        if(!moved){
+            stk.pop();
+            if(stk.length){
+                const [pr,pc]=stk[stk.length-1];
+                steps.push({act:'back',r:pr,c:pc,fr:r,fc:c});
+            }
+        }
+    }
+    return steps;
+}
+
+// ── 알고리즘 1: DFS (고정 순서 N→E→S→W) ─────────────────────────────────────
+function buildDFS(){
+    return buildGenericDFS(_facing=>[0,1,2,3]);
+}
+
+// ── 알고리즘 2: BFS (너비우선 물결) ─────────────────────────────────────────
+function buildBFS(){
+    const [cr,cc]=CENTER();
+    const steps=[{act:'move',r:0,c:0}];
+    const vis=new Set(['0,0']); const q=[[0,0]];
+    while(q.length){
+        const [r,c]=q.shift();
+        if(r===cr&&c===cc) break;
+        for(let d=0;d<4;d++){
+            if(!canGo(r,c,d)) continue;
+            const nr=r+DR4[d],nc=c+DC4[d],key=`${nr},${nc}`;
+            if(!vis.has(key)){vis.add(key);steps.push({act:'move',r:nr,c:nc});q.push([nr,nc]);}
+        }
+    }
+    return steps;
+}
+
+// ── 알고리즘 3: A★ (Manhattan 휴리스틱) ──────────────────────────────────────
+function buildAStar(){
+    const [cr,cc]=CENTER();
+    const h=(r,c)=>Math.abs(r-cr)+Math.abs(c-cc);
+    const steps=[{act:'move',r:0,c:0}];
+    const vis=new Set(); const dist=new Map([['0,0',0]]);
+    const pq=[{r:0,c:0,g:0,f:h(0,0)}];
+    while(pq.length){
+        pq.sort((a,b)=>a.f-b.f);
+        const {r,c,g}=pq.shift(); const key=`${r},${c}`;
+        if(vis.has(key)) continue;
+        vis.add(key);
+        if(r!==0||c!==0) steps.push({act:'move',r,c});
+        if(r===cr&&c===cc) break;
+        for(let d=0;d<4;d++){
+            if(!canGo(r,c,d)) continue;
+            const nr=r+DR4[d],nc=c+DC4[d],nk=`${nr},${nc}`;
+            if(!vis.has(nk)){
+                const ng=g+1;
+                if(!dist.has(nk)||ng<dist.get(nk)){
+                    dist.set(nk,ng); pq.push({r:nr,c:nc,g:ng,f:ng+h(nr,nc)});
+                }
+            }
+        }
+    }
+    return steps;
+}
+
+// ── 알고리즘 4: 왼손법칙 DFS (좌편향) ────────────────────────────────────────
+// facing 방향 기준으로 좌→직진→우→뒤 순서
+function buildLHR(){
+    return buildGenericDFS(facing=>[(facing+3)%4, facing, (facing+1)%4, (facing+2)%4]);
+}
+
+// ── 알고리즘 5: 무작위 DFS (매 셀마다 방향 셔플) ─────────────────────────────
+function buildRandom(){
+    return buildGenericDFS(_=>shuffle([0,1,2,3]));
+}
+
+// ── 알고리즘 6: 트레모 (통로 마크 기반, 미방문 우선) ─────────────────────────
+// 통로에 마크(0,1,2) 부착. 마크 2인 통로는 절대 재진입 안함.
+// 미방문(0) 우선 → 1회 통과(1) 허용 → 2회 불가
+// 완전 미로에서는 DFS와 동일 경로지만 통로 색상으로 시각화
+function buildTremaux(){
+    const [cr,cc]=CENTER();
+    const steps=[{act:'move',r:0,c:0}];
+    // pm[r][c][d]: 해당 방향으로 나간 횟수
+    const pm=Array.from({length:ROWS},()=>Array.from({length:COLS},()=>Array(4).fill(0)));
+    const vis=new Set(['0,0']);
+    const stk=[[0,0]]; // 방문 경로 스택
+    let r=0,c=0; let found=false;
+
+    while(stk.length&&!found){
+        if(r===cr&&c===cc){found=true;break;}
+        // 미방문 인접셀 우선, 그 다음 1회마크통로
+        let bestD=-1, bestM=3;
+        for(let d=0;d<4;d++){
+            if(!canGo(r,c,d)) continue;
+            const nr=r+DR4[d],nc=c+DC4[d];
+            const m=pm[r][c][d]; // 이 방향으로 나간 횟수
+            if(m>=2) continue;  // 2회 이상 통과한 통로 금지
+            const notVisited=!vis.has(`${nr},${nc}`);
+            const score=notVisited?0:m+1; // 미방문=0, 1회=2
+            if(score<bestM){bestM=score;bestD=d;}
+        }
+        if(bestD===-1){
+            // 막힘 → 역추적
+            stk.pop();
+            if(stk.length){
+                const [pr,pc]=stk[stk.length-1];
+                steps.push({act:'back',r:pr,c:pc,fr:r,fc:c,pm:pm});
+                r=pr;c=pc;
+            }
+        } else {
+            // 이동
+            pm[r][c][bestD]++;
+            const nr=r+DR4[bestD],nc=c+DC4[bestD];
+            pm[nr][nc][(bestD+2)%4]++;
+            vis.add(`${nr},${nc}`);
+            r=nr;c=nc;
+            stk.push([r,c]);
+            steps.push({act:'move',r,c,pm:JSON.parse(JSON.stringify(pm))});
+        }
+    }
+    return steps;
+}
+
+// ── 알고리즘 7: 막힌길 제거 (Dead-end Fill) ──────────────────────────────────
+// 막힌 셀(통로 1개)을 바깥에서 안으로 점진적으로 채워서 해답 경로만 남김
+function buildDeadEnd(){
+    const [cr,cc]=CENTER();
+    const steps=[];
+    const filled=Array.from({length:ROWS},()=>Array(COLS).fill(false));
+
+    // 열린 통로 수 계산 (채워진 셀 제외)
+    function openCount(r,c){
+        let cnt=0;
+        for(let d=0;d<4;d++) if(canGo(r,c,d)&&!filled[r+DR4[d]][c+DC4[d]]) cnt++;
+        return cnt;
+    }
+
+    // 막힌 셀 반복 제거
+    let changed=true;
+    while(changed){
+        changed=false;
+        for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+            if(filled[r][c]) continue;
+            if((r===0&&c===0)||(r===cr&&c===cc)) continue; // 출발/도착 보호
+            if(openCount(r,c)===1){
+                filled[r][c]=true;
+                steps.push({act:'fill',r,c});
+                changed=true;
+            }
+        }
+    }
+    // 남은 셀(해답 경로)에 BFS로 이동 경로 추가
+    const parent=new Map([['0,0',null]]);
+    const q=[[0,0]];
+    while(q.length){
+        const [r,c]=q.shift();
+        if(r===cr&&c===cc) break;
+        for(let d=0;d<4;d++){
+            if(!canGo(r,c,d)) continue;
+            const nr=r+DR4[d],nc=c+DC4[d],nk=`${nr},${nc}`;
+            if(!parent.has(nk)&&!filled[nr][nc]){parent.set(nk,[r,c]);q.push([nr,nc]);}
+        }
+    }
+    let pos=[cr,cc]; const solPath=[];
+    while(pos){solPath.unshift(pos);pos=parent.get(`${pos[0]},${pos[1]}`);}
+    for(const [r,c] of solPath) steps.push({act:'sol',r,c});
+    return steps;
+}
+
+// ── 알고리즘 8: 양방향 BFS ───────────────────────────────────────────────────
+function buildBidi(){
+    const [cr,cc]=CENTER();
+    const steps=[];
+    const visA=new Map([['0,0',null]]);
+    const visB=new Map([[`${cr},${cc}`,null]]);
+    const qA=[[0,0]], qB=[[cr,cc]];
+    let meet=null;
+    outer:
+    while((qA.length||qB.length)&&!meet){
+        // A 확장
+        if(qA.length){
+            const [r,c]=qA.shift();
+            steps.push({act:'a',r,c});
+            for(let d=0;d<4;d++){
+                if(!canGo(r,c,d)) continue;
+                const nr=r+DR4[d],nc=c+DC4[d],nk=`${nr},${nc}`;
+                if(!visA.has(nk)){
+                    visA.set(nk,[r,c]);
+                    if(visB.has(nk)){meet=nk;break outer;}
+                    qA.push([nr,nc]);
+                }
+            }
+        }
+        // B 확장
+        if(qB.length){
+            const [r,c]=qB.shift();
+            steps.push({act:'b',r,c});
+            for(let d=0;d<4;d++){
+                if(!canGo(r,c,d)) continue;
+                const nr=r+DR4[d],nc=c+DC4[d],nk=`${nr},${nc}`;
+                if(!visB.has(nk)){
+                    visB.set(nk,[r,c]);
+                    if(visA.has(nk)){meet=nk;break outer;}
+                    qB.push([nr,nc]);
+                }
+            }
+        }
+    }
+    return steps;
+}
+
+// ── BFS 최단경로 ──────────────────────────────────────────────────────────────
+function buildBfsPath(){
+    const [cr,cc]=CENTER();
+    const parent=new Map([['0,0',null]]); const q=[[0,0]];
+    while(q.length){
+        const [r,c]=q.shift();
+        if(r===cr&&c===cc) break;
+        for(let d=0;d<4;d++){
+            if(!canGo(r,c,d)) continue;
+            const nr=r+DR4[d],nc=c+DC4[d],nk=`${nr},${nc}`;
+            if(!parent.has(nk)){parent.set(nk,[r,c]);q.push([nr,nc]);}
+        }
+    }
+    const path=[]; let pos=[cr,cc];
+    while(pos){path.unshift(pos);pos=parent.get(`${pos[0]},${pos[1]}`);}
+    return path;
+}
+
+function buildSteps(){
+    pMark=null;
+    const fn={dfs:buildDFS,bfs:buildBFS,astar:buildAStar,lhr:buildLHR,
+              random:buildRandom,tremaux:buildTremaux,deadend:buildDeadEnd,bidi:buildBidi};
+    return (fn[curAlgo]||buildDFS)();
+}
+
+// ── 소리 (펜타토닉) ───────────────────────────────────────────────────────────
+const PENTA=[261.6,293.7,349.2,392.0,440.0,523.3,587.3,659.3,783.9];
+function getAC(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function tone(freq,dur,vol=0.07,type='sine'){
+    if(!soundOn||getDelay()<18) return;
+    try{const ac=getAC(),o=ac.createOscillator(),g=ac.createGain();
+        o.connect(g);g.connect(ac.destination);o.type=type;o.frequency.value=freq;
+        g.gain.setValueAtTime(vol,ac.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur);
+        o.start();o.stop(ac.currentTime+dur+0.01);}catch(e){}
+}
+function playMove(r,c){
+    const [cr,cc]=CENTER(),md=cr+cc,d=Math.abs(r-cr)+Math.abs(c-cc);
+    tone(PENTA[Math.min(8,Math.floor((1-d/md)*6)+2)],0.07,0.065);
+}
+function playBack(){tone(PENTA[1],0.09,0.05);}
+function playArrive(){if(!soundOn)return;[523.3,659.3,783.9,1046.5].forEach((f,i)=>setTimeout(()=>tone(f,0.25,0.12),i*130));}
+function playP2(){if(!soundOn)return;[392,523.3].forEach((f,i)=>setTimeout(()=>tone(f,0.2,0.1),i*100));}
+
+// ── 그리기 ────────────────────────────────────────────────────────────────────
+const COL={
+    bg:'#080818',floor:'#0e0e22',
+    v1:'#0d3a4a', v2:'#2e0a3e', v3:'#062818', v4:'#0a4028',
+    va:'#0d2a4a', vb:'#3a1800', vf:'#2a0808',
+    cor:'#182448', wall:'#4455bb',
+    ag1:'#ffd700', ag2:'#00ffcc', agb:'#ff7733',
+    S:'#00ff88', G:'#ff5555',
+    // 트레모 통로 마크 색
+    tm1:'#cc8800', tm2:'#cc3300',
+};
+const ccx=c=>c*CS+CS/2, ccy=r=>r*CS+CS/2;
+
+function draw(){
+    ctx.fillStyle=COL.bg; ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(!walls) return;
+
+    // 1. 셀 색상
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+        const st=cellSt[r]?.[c]??0;
+        ctx.fillStyle=st===1?COL.v1:st===2?COL.v2:st===3?COL.v3:st===4?COL.v4
+                     :st===5?COL.va:st===6?COL.vb:st===7?COL.vf:COL.floor;
+        ctx.fillRect(c*CS+1,r*CS+1,CS-1,CS-1);
+    }
+
+    // 2. 통로 라인 (트레모: 마크 색, 그 외: 기본 dim)
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+        const drawLine=(r1,c1,r2,c2,m)=>{
+            let col=COL.cor;
+            if(curAlgo==='tremaux'&&pMark){
+                const t=pMark[r1]?.[c1];
+                if(t) col=t[dIdx(r2-r1,c2-c1)]>=2?COL.tm2:t[dIdx(r2-r1,c2-c1)]>=1?COL.tm1:COL.cor;
+            }
+            ctx.strokeStyle=col; ctx.lineWidth=curAlgo==='tremaux'&&col!==COL.cor?2:1;
+            ctx.beginPath(); ctx.moveTo(ccx(c1),ccy(r1)); ctx.lineTo(ccx(c2),ccy(r2)); ctx.stroke();
+        };
+        if(c+1<COLS&&!walls[r][c].right) drawLine(r,c,r,c+1);
+        if(r+1<ROWS&&!walls[r][c].bottom) drawLine(r,c,r+1,c);
+    }
+
+    // 3. 벽 라인
+    ctx.strokeStyle=COL.wall; ctx.lineWidth=CS>12?1.5:1;
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+        const x=c*CS,y=r*CS,w=walls[r][c];
+        const ln=(x1,y1,x2,y2)=>{ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
+        if(w.top)    ln(x,y,x+CS,y);
+        if(w.left)   ln(x,y,x,y+CS);
+        if(w.bottom) ln(x,y+CS,x+CS,y+CS);
+        if(w.right)  ln(x+CS,y,x+CS,y+CS);
+    }
+
+    // 4. S/G 마커
+    if(CS>=9){
+        ctx.font=`bold ${Math.max(8,CS/3|0)}px monospace`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle=COL.S; ctx.fillText('S',ccx(0),ccy(0));
+        const [cr2,cc2]=CENTER();
+        ctx.fillStyle=COL.G; ctx.fillText('G',ccx(cc2),ccy(cr2));
+    }
+
+    // 5. 에이전트
+    const drawAgent=(pos,col)=>{
+        if(!pos) return;
+        const [ar,ac]=pos, rad=Math.max(2,CS/2-(CS>15?3:1));
+        ctx.beginPath(); ctx.arc(ccx(ac),ccy(ar),rad,0,Math.PI*2);
+        ctx.fillStyle=col; ctx.fill();
+        if(CS>10){ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=1;ctx.stroke();}
+    };
+    if(phase!=='idle'){
+        const col=(phase==='bfs'||phase==='done')?COL.ag2:COL.ag1;
+        drawAgent(agent,col);
+        if(curAlgo==='bidi'&&phase==='p1') drawAgent(agentB,COL.agb);
+    }
+}
+
+// ── 애니메이션 ────────────────────────────────────────────────────────────────
+const stopTimer=()=>{if(timer){clearTimeout(timer);timer=null;}};
+const getDelay=()=>Math.round(508-+document.getElementById('spdSlider').value*8);
+const schedule=()=>{timer=setTimeout(tick,getDelay());};
+const setStatus=m=>{document.getElementById('status').textContent=m;};
+
+function tick(){
+    if(phase==='p1'){
+        if(idx>=p1Steps.length){
+            const name=ALGOS.find(a=>a.id===curAlgo)?.name||'';
+            setStatus(`✔ 1단계 ${name} 완료 (${p1Steps.length} 스텝) → 최단경로 시작…`);
+            playArrive(); timer=setTimeout(startP2,900); return;
+        }
+        const s=p1Steps[idx++];
+        // 트레모 통로 마크 업데이트
+        if(s.pm) pMark=s.pm;
+
+        if(s.act==='move'){
+            agent=[s.r,s.c];
+            if(!(cellSt[s.r]?.[s.c]>0)) cellSt[s.r][s.c]=1;
+            playMove(s.r,s.c);
+        } else if(s.act==='back'){
+            cellSt[s.fr][s.fc]=2; agent=[s.r,s.c]; playBack();
+        } else if(s.act==='a'){  // BiDi A
+            agent=[s.r,s.c];
+            if(!(cellSt[s.r]?.[s.c]>0)) cellSt[s.r][s.c]=5;
+            playMove(s.r,s.c);
+        } else if(s.act==='b'){  // BiDi B
+            agentB=[s.r,s.c];
+            if(!(cellSt[s.r]?.[s.c]>0)) cellSt[s.r][s.c]=6;
+            tone(PENTA[2],0.07,0.065);
+        } else if(s.act==='fill'){  // 막힌길 제거
+            agent=[s.r,s.c]; cellSt[s.r][s.c]=7;
+            tone(PENTA[0],0.05,0.04);
+        } else if(s.act==='sol'){  // 막힌길제거 - 해답경로
+            agent=[s.r,s.c];
+            if(cellSt[s.r][s.c]===0) cellSt[s.r][s.c]=1;
+            playMove(s.r,s.c);
+        }
+        draw();
+        const name=ALGOS.find(a=>a.id===curAlgo)?.name||'';
+        setStatus(`[1단계 ${name}]  ${idx} / ${p1Steps.length} 스텝`);
+        schedule();
+
+    } else if(phase==='bfs'){
+        if(idx>=bfsPath.length){
+            phase='done'; draw(); playArrive();
+            setStatus(`🏁 완료! 최단경로 ${bfsPath.length-1} 스텝`); return;
+        }
+        const [r,c]=bfsPath[idx++];
+        agent=[r,c]; cellSt[r][c]=4; playMove(r,c);
+        draw();
+        setStatus(`[2단계 BFS 최단경로]  ${idx} / ${bfsPath.length} 스텝`);
+        schedule();
+    }
+}
+
+function startP2(){
+    phase='bfs'; idx=0; agent=[0,0]; agentB=null;
+    for(const [r,c] of bfsPath) if((cellSt[r]?.[c]??0)<3) cellSt[r][c]=3;
+    draw(); playP2();
+    setStatus(`[2단계 BFS 최단경로 시작]  총 ${bfsPath.length-1} 스텝`);
+    schedule();
+}
+
+// ── 새 미로 ───────────────────────────────────────────────────────────────────
+function newMaze(){
+    stopTimer();
+    const n=Math.max(5,Math.min(50,parseInt(document.getElementById('sizeInput').value)||20));
+    ROWS=COLS=n;
+    document.getElementById('sizeInput').value=n;
+    document.getElementById('sizeLbl').textContent=n;
+    updateCanvas();
+    phase='idle'; agent=[0,0]; agentB=null; pMark=null;
+    cellSt=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+    genMaze(); p1Steps=buildSteps(); bfsPath=buildBfsPath();
+    draw();
+    const name=ALGOS.find(a=>a.id===curAlgo)?.name||'';
+    setStatus(`생성 완료 (${ROWS}×${COLS})  |  ${name} ${p1Steps.length}스텝  /  최단 ${bfsPath.length-1}스텝`);
+}
+
+// ── 버튼 ──────────────────────────────────────────────────────────────────────
+document.getElementById('btnNew').onclick=newMaze;
+document.getElementById('btnStart').onclick=()=>{
+    if(!walls){setStatus('먼저 새 미로를 생성하세요!');return;}
+    if(phase==='p1'||phase==='bfs') return;
+    stopTimer(); phase='p1'; idx=0; agent=[0,0]; agentB=null; pMark=null;
+    cellSt=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+    draw(); setStatus('[1단계 탐색 시작…]'); schedule();
+};
+document.getElementById('btnStop').onclick=()=>{
+    stopTimer();
+    if(phase==='p1'||phase==='bfs'){phase='idle';setStatus('⏹ 중지됨.');}
+};
+document.getElementById('spdSlider').oninput=function(){
+    document.getElementById('spdLbl').textContent=this.value;};
+const sndBtn=document.getElementById('sndBtn');
+sndBtn.onclick=()=>{
+    soundOn=!soundOn;
+    sndBtn.textContent=soundOn?'🔊 소리':'🔇 소리';
+    sndBtn.classList.toggle('off',!soundOn);
+};
+
+// ── 알고리즘 버튼 생성 ────────────────────────────────────────────────────────
+const grid=document.getElementById('algoGrid');
+ALGOS.forEach(({id,icon,name,desc})=>{
+    const btn=document.createElement('button');
+    btn.className='abtn'+(id===curAlgo?' on':'');
+    btn.innerHTML=`<span class="ai">${icon}</span><span class="an">${name}</span><span class="ad">${desc}</span>`;
+    btn.onclick=()=>{
+        curAlgo=id;
+        document.querySelectorAll('.abtn').forEach(b=>b.classList.remove('on'));
+        btn.classList.add('on');
+        if(walls&&phase==='idle'){
+            p1Steps=buildSteps();
+            setStatus(`알고리즘: ${name}  |  ${p1Steps.length}스텝  /  최단 ${bfsPath.length-1}스텝`);
+        }
+    };
+    grid.appendChild(btn);
+});
+
+// ── 초기화 ────────────────────────────────────────────────────────────────────
+newMaze();
+</script>
+</body>
+</html>
